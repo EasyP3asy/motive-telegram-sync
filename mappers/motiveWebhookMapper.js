@@ -50,7 +50,7 @@ export function mapMotiveWebhook(payload) {
   const inwardJPGUrl = payload?.camera_media?.downloadable_images?.driver_facing_jpg_url ?? null;
   const forwardJPGUrl = payload?.camera_media?.downloadable_images?.front_facing_jpg_url ?? null;
 
-
+  const alertId = payload?.metadata?.id?.[0];
   const alertType = payload?.type ?? null;
   const parsedAlertType = alertType ? eventTypeParse(alertType) : null;
 
@@ -85,12 +85,14 @@ export function mapMotiveWebhook(payload) {
     duration,
     startTime,
     formattedTimestamp,
+    alertId,
     parsedAlertType,
     media: {
       forwardVideoUrl,
       inwardVideoUrl,
       forwardJPGUrl,
-      inwardJPGUrl
+      inwardJPGUrl,
+      dualEnhancedVideoUrl : null
     },
     minSpeed,
     maxSpeed,

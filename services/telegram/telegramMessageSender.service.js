@@ -64,6 +64,7 @@ export async function sendVideosAsMediaGroup(
   startTime,
   forwardUrl, 
   inwardUrl, 
+  dualEnhancedVideoUrl,
   alertType, 
   driver,
   formattedLocation, 
@@ -77,21 +78,20 @@ export async function sendVideosAsMediaGroup(
     const motiveLink = `https://app.gomotive.com/en-US/#/safety/events/${eventId};start_time=${startTime}`;  // link for motive
   try {
 
-    
-    const forwardBuffer = await getVideoBuffer(forwardUrl);
-    const inwardBuffer = await getVideoBuffer(inwardUrl);
+    let forwardBuffer = null;
+    let inwardBuffer = null ;
+    let dualVideoBuffer = null;
 
-   
-
-    const form = new FormData();
-
-    form.append('chat_id', env.TELEGRAM_CHAT_ID);
-
-    const media = [
-      {
-        type: 'video',
-        media: 'attach://forward',               
-        caption:
+    if(dualEnhancedVideoUrl){
+      dualVideoBuffer = await getVideoBuffer(dualEnhancedVideoUrl);
+    }
+    else if (forwardUrl && inwardUrl){
+      forwardBuffer = await getVideoBuffer(forwardUrl);
+      inwardBuffer = await getVideoBuffer(inwardUrl);
+    }
+ 
+     
+    const caption =  
           `🌐 *Motive ID : ${eventId}*\n` +
           `${escapeMarkdownV2("============================")}\n` +
           `🚨 *${escapeMarkdownV2(alertType)}*\n` +
@@ -101,24 +101,57 @@ export async function sendVideosAsMediaGroup(
           `🕒 Time: ${escapeMarkdownV2(time)}\n` +
           `🛑 Severity: *${escapeMarkdownV2(severity)}*\n` +
           `🧭 Speed range: *${escapeMarkdownV2(speedRange)}*\n` +
-          `🔗 [Open in Motive](${escapeMarkdownV2(motiveLink)})\n`,
-        parse_mode: 'MarkdownV2'                         // markdown 
-      },
-      { 
-        type: 'video',        
-        media: 'attach://inward' 
-      }
-    ];
+          `🔗 [Open in Motive](${escapeMarkdownV2(motiveLink)})\n`;
+    
+    let media =[];
+    const form = new FormData();
 
-    form.append('forward', forwardBuffer, {
-      filename: 'forward.mp4',
-      contentType: 'video/mp4'
-    });
+    form.append('chat_id', env.TELEGRAM_CHAT_ID);
 
-    form.append('inward', inwardBuffer, {
-      filename: 'inward.mp4',
-      contentType: 'video/mp4'
-    });
+    if(dualEnhancedVideoUrl){
+        media =  [
+          {
+            type: 'video',
+            media: 'attach://dualEnhancedVideo',               
+            caption,         
+            parse_mode: 'MarkdownV2'                         // markdown 
+          },     
+        ];
+
+        form.append('dualEnhancedVideo', dualVideoBuffer, {
+          filename: 'dualEnhancedVideo.mp4',
+          contentType: 'video/mp4'
+        });
+    }else if(forwardBuffer && inwardBuffer){
+
+       media = [
+        {
+          type: 'video',
+          media: 'attach://forwardUrl',               
+          caption,         
+          parse_mode: 'MarkdownV2'                         // markdown 
+        },
+        {
+          type : 'video',
+          media: 'attach://inwardUrl'
+        } 
+      ];
+
+      form.append('forwardUrl', forwardBuffer, {
+        filename: 'forwardUrl.mp4',
+        contentType: 'video/mp4'
+      });
+
+      form.append('inwardUrl', inwardBuffer, {
+        filename: 'inwardUrl.mp4',
+        contentType: 'video/mp4'
+      });
+
+    }
+
+   
+
+   
 
    
       

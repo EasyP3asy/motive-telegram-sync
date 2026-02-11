@@ -7,7 +7,11 @@ export async function processMotiveWebhook(payload) {
     throw new AppError("Invalid webhook payload", 400, "INVALID_PAYLOAD");
   }
 
+  
+
   const normalized = mapMotiveWebhook(payload);
+
+  
 
   // A couple of "must-haves" (tweak as you like)
   if (!normalized.eventId) {

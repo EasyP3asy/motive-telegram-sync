@@ -1,7 +1,7 @@
 
 import { logger } from "../utils/logger.js";
 import { processMotiveWebhook } from "../services/motive/motiveWebhookParser.service.js";
-import { requestVideo , getVideoMetaData , waitForVideoReady } from  "../services/motive/motiveVideoRequestService.js";
+import { requestVideo , getVideoMetaData , waitForVideoReady ,requestEnhancedDualVideo , waitForEnhancedVideoURLReady, makeApiRequest } from  "../services/motive/motiveVideoRequestService.js";
 import { sendVideosAsMediaGroup , sendImagesToGroup } from "../services/telegram/telegramMessageSender.service.js"
 
 export async function handleMotiveWebhook(req, res) {
@@ -18,36 +18,64 @@ export async function handleMotiveWebhook(req, res) {
       const hasVideo =
         normalizedWebhook?.media?.forwardVideoUrl ||
         normalizedWebhook?.media?.inwardVideoUrl;
-      let videoRequestResponseCode = null;      
-      let isVideoReady = false;
+      let rawVideoRequestResponse = null;
+      let enhancenVideoRequestResponse = null;     
+      let isRawVideoReadyAndAvailable = false;
       let videoMetaData = null;
+      let isEnhancedVideoReadyAndAvailable = false;
       
-      
+      rawVideoRequestResponse = await requestVideo(normalizedWebhook,null,'POST');
+      videoMetaData = await getVideoMetaData(normalizedWebhook);
 
-      if (!hasVideo) {
-        videoRequestResponseCode = await requestVideo(normalizedWebhook,null,'POST');
-        videoMetaData = await getVideoMetaData(normalizedWebhook);
-
-        normalizedWebhook.media.forwardVideoUrl = videoMetaData?.driver_performance_event?.camera_media?.downloadable_videos?.front_facing_plain_url; 
-
-        normalizedWebhook.media.inwardVideoUrl = videoMetaData?.driver_performance_event?.camera_media?.downloadable_videos?.driver_facing_plain_url;
-
-
-        if(videoRequestResponseCode === 201 ){         
-          isVideoReady = await waitForVideoReady(normalizedWebhook);          
-        }
-       
-
+      if(rawVideoRequestResponse !== 201 ){
+        logger.error('Raw Video Request responded with code : ',rawVideoRequestResponse ) ;              
       }
 
-      videoMetaData = await getVideoMetaData(normalizedWebhook);
-      normalizedWebhook.media.forwardVideoUrl = videoMetaData?.driver_performance_event?.camera_media?.downloadable_videos?.front_facing_plain_url; 
+      if(videoMetaData){
+        normalizedWebhook.media.forwardVideoUrl = videoMetaData?.driver_performance_event?.camera_media?.downloadable_videos?.front_facing_plain_url;
+        normalizedWebhook.media.inwardVideoUrl = videoMetaData?.driver_performance_event?.camera_media?.downloadable_videos?.driver_facing_plain_url;
+      }else{
+        logger.info('No Video Meta Data ' , videoMetaData) ;
+      }
+      
 
-      normalizedWebhook.media.inwardVideoUrl = videoMetaData?.driver_performance_event?.camera_media?.downloadable_videos?.driver_facing_plain_url;
-
-      normalizedWebhook.location = videoMetaData ?  videoMetaData?.driver_performance_event?.address : normalizedWebhook.location;     
+      if(rawVideoRequestResponse === 201 && normalizedWebhook.media.forwardVideoUrl && !requestBody?.sub_events){         
+        isRawVideoReadyAndAvailable = await waitForVideoReady(normalizedWebhook.media.forwardVideoUrl);  
+      }else{
+        logger.info('No Video URL : ', normalizedWebhook.eventId);
+      }
 
       
+
+      if(isRawVideoReadyAndAvailable){
+        enhancenVideoRequestResponse = await requestEnhancedDualVideo(normalizedWebhook,null,'PUT');
+      }
+
+      
+      if(enhancenVideoRequestResponse?.result === true){
+          videoMetaData = await waitForEnhancedVideoURLReady(normalizedWebhook);
+          
+          normalizedWebhook.media.dualEnhancedVideoUrl = videoMetaData?.driver_performance_event?.camera_media?.downloadable_videos?.dual_facing_enhanced_url;           
+          if(normalizedWebhook.media.dualEnhancedVideoUrl){
+              isEnhancedVideoReadyAndAvailable = await waitForVideoReady(normalizedWebhook.media.dualEnhancedVideoUrl);
+          }          
+      }    
+
+     
+     
+
+      normalizedWebhook.media.forwardVideoUrl = videoMetaData?.driver_performance_event?.camera_media?.downloadable_videos?.front_facing_plain_url;
+      normalizedWebhook.media.inwardVideoUrl = videoMetaData?.driver_performance_event?.camera_media?.downloadable_videos?.driver_facing_plain_url;
+      
+
+
+     
+
+
+      
+       
+
+          
 
 
 
@@ -65,6 +93,7 @@ export async function handleMotiveWebhook(req, res) {
                 normalizedWebhook.startTime,
                 subEventForwardVideoUrl,
                 subEvenInwardVideoUrl,
+                null,
                 normalizedWebhook.parsedAlertType,
                 normalizedWebhook.driverFullName,
                 normalizedWebhook.location,   
@@ -78,15 +107,18 @@ export async function handleMotiveWebhook(req, res) {
         return ;
 
       }
+
+
       
       
-      if(isVideoReady || hasVideo){
+      if(isEnhancedVideoReadyAndAvailable || isRawVideoReadyAndAvailable  || hasVideo){
 
         await sendVideosAsMediaGroup(
           normalizedWebhook.eventId,
           normalizedWebhook.startTime,
           normalizedWebhook.media.forwardVideoUrl,
           normalizedWebhook.media.inwardVideoUrl,
+          normalizedWebhook.media.dualEnhancedVideoUrl,
           normalizedWebhook.parsedAlertType,
           normalizedWebhook.driverFullName,
           normalizedWebhook.location,
@@ -116,7 +148,11 @@ export async function handleMotiveWebhook(req, res) {
       }
       
 
-      
+    //  await makeApiRequest({
+    //   url : 'https://n8n-octopus.com/webhook/07582a59-70cd-4fda-a07c-b0c51022adc0',
+    //   method : 'POST',
+    //   body : normalizedWebhook
+    // });
 
 
       

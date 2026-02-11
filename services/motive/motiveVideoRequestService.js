@@ -10,7 +10,7 @@ export async function requestVideo(payload,body = null,method) {
     };
 
    
-    return makeApiRequest({
+    return await makeApiRequest({
           url,
           method: method, // optional if your helper auto-chooses GET
           body,
@@ -22,6 +22,33 @@ export async function requestVideo(payload,body = null,method) {
      
         
 }
+
+
+
+export async function requestEnhancedDualVideo(payload,body = null,method) {
+    const url = `${env.MOTIVE_BASE_URL}/api/w2/driver_performance/events/${payload.eventId}/process_downloadable_video`;
+    body = body ??  {
+        id:payload.eventId,
+        ai_visualization_enabled:false,
+        cam_positions:["front_facing","driver_facing"],
+        enhanced_telematics:true,
+        start_time : payload.startTime,
+    };
+
+   
+    return await makeApiRequest({
+          url,
+          method: method, // optional if your helper auto-chooses GET
+          body,
+          headers: {
+            'x-web-user-auth': env.MOTIVE_X_WEB_USER_AUTH,
+          },
+        });       
+        
+}
+
+
+
 
 
 
@@ -45,7 +72,7 @@ export async function getVideoMetaData(payload) {
 
 
 
-async function makeApiRequest({
+export async function makeApiRequest({
   url,
   method = 'GET',
   body,                 // request body (object, string, FormData, etc.)
@@ -179,17 +206,15 @@ async function makeApiRequest({
 // }
 
 
-export async function waitForVideoReady( normalizedWebhook,  maxTries = 8 ) {
+export async function waitForVideoReady(   videoUrl, maxTries = 15   ) {
+  
   
     
-  for (let i = 0; i < maxTries; i++) {    
+  for (let i = 0; i < maxTries; i++) {     
 
-    const forwardUrl = normalizedWebhook?.media?.forwardVideoUrl;
-    const inwardUrl = normalizedWebhook?.media?.inwardVideoUrl;
-
-    if (forwardUrl) {
-      const probe = await probeVideoUrl(forwardUrl);
-      if (probe.ok) return { forwardUrl, inwardUrl };     
+    if (videoUrl) {
+      const probe = await probeVideoUrl(videoUrl);
+      if (probe.ok) return true;     
     }
 
     await new Promise(r => setTimeout(r, 60000)); // wait 60s
@@ -228,4 +253,26 @@ export async function probeVideoUrl(url) {
   }
 
   return { ok: false, reason: `status_${res.status}` };
+}
+
+
+
+
+export async function waitForEnhancedVideoURLReady(  normalizedWebhook, maxTries = 12  ) {
+  
+  let metaData = null;
+    
+  for (let i = 0; i < maxTries; i++) { 
+    metaData = await getVideoMetaData(normalizedWebhook);      
+    const enhancedVideoUrl = metaData?.driver_performance_event?.camera_media?.downloadable_videos?.dual_facing_enhanced_url;
+
+    if (enhancedVideoUrl) {
+          
+      if (enhancedVideoUrl) return metaData;     
+    }
+
+    await new Promise(r => setTimeout(r, 10000)); // wait 60s
+  }
+
+  return metaData;
 }
