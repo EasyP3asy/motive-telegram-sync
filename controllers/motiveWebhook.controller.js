@@ -1,86 +1,131 @@
 
 import { logger } from "../utils/logger.js";
 import { processMotiveWebhook } from "../services/motive/motiveWebhookParser.service.js";
-import { requestVideo , getVideoMetaData , waitForVideoReady ,requestEnhancedDualVideo , waitForEnhancedVideoURLReady, makeApiRequest } from  "../services/motive/motiveVideoRequestService.js";
-import { sendVideosAsMediaGroup , sendImagesToGroup } from "../services/telegram/telegramMessageSender.service.js"
+import { 
+   requestVideo ,
+   getVideoMetaData ,
+   waitForVideoReady ,
+   requestEnhancedDualVideo ,
+   waitForEnhancedVideoURLReady,  
+} from  "../services/motive/motiveVideoRequestService.js";
+
+import { 
+  sendVideosAsMediaGroupStream , 
+  sendImagesToGroup 
+} from "../services/telegram/telegramMessageSender.service.js"
+
 
 export async function handleMotiveWebhook(req, res) {
   const requestBody = req.body;
 
-  // Log the webhook (keep it light)
+  
   logger.info("Motive webhook received");
 
-  
+  res.json({ ok: true });
+
    void (async () => {
     try {
       const normalizedWebhook = await processMotiveWebhook(requestBody);
-
-      const hasVideo =
-        normalizedWebhook?.media?.forwardVideoUrl ||
-        normalizedWebhook?.media?.inwardVideoUrl;
-      let rawVideoRequestResponse = null;
-      let enhancenVideoRequestResponse = null;     
-      let isRawVideoReadyAndAvailable = false;
-      let videoMetaData = null;
-      let isEnhancedVideoReadyAndAvailable = false;
       
-      rawVideoRequestResponse = await requestVideo(normalizedWebhook,null,'POST');
-      videoMetaData = await getVideoMetaData(normalizedWebhook);
 
-      if(rawVideoRequestResponse !== 201 ){
+      let isEnhancedVideoReadyAndAvailable = false;
+      let isRawVideoReadyAndAvailable = false;      
+      let enhancenVideoRequestResponse = null;        
+      let videoMetaData = null;      
+
+       // ── 1. Request raw video ──────────────────────────────────────────────
+      const rawVideoRequestResponse = await requestVideo(normalizedWebhook,null,'POST');      
+
+      if(!rawVideoRequestResponse){
         logger.error('Raw Video Request responded with code : ',rawVideoRequestResponse ) ;              
       }
 
+      // ── 2. Fetch metadata ─────────────────────────────────────────────────
+      videoMetaData = await getVideoMetaData(normalizedWebhook);
+
       if(videoMetaData){
-        normalizedWebhook.media.forwardVideoUrl = videoMetaData?.driver_performance_event?.camera_media?.downloadable_videos?.front_facing_plain_url;
-        normalizedWebhook.media.inwardVideoUrl = videoMetaData?.driver_performance_event?.camera_media?.downloadable_videos?.driver_facing_plain_url;
+        const videos = videoMetaData?.driver_performance_event?.camera_media?.downloadable_videos;
+        normalizedWebhook.media.forwardVideoUrl = videos?.front_facing_plain_url ?? null;
+        normalizedWebhook.media.inwardVideoUrl = videos?.driver_facing_plain_url ?? null;
       }else{
         logger.info('No Video Meta Data ' , videoMetaData) ;
       }
       
 
-      if(rawVideoRequestResponse === 201 && normalizedWebhook.media.forwardVideoUrl && !requestBody?.sub_events){         
-        isRawVideoReadyAndAvailable = await waitForVideoReady(normalizedWebhook.media.forwardVideoUrl);  
+       // ── 3. Wait for raw video to be ready ─────────────────────────────────
+
+      if(
+        rawVideoRequestResponse &&
+        normalizedWebhook.media.forwardVideoUrl &&
+        !requestBody?.sub_events
+      ){         
+        isRawVideoReadyAndAvailable = await waitForVideoReady(
+         normalizedWebhook.media.forwardVideoUrl,
+         normalizedWebhook.media.inwardVideoUrl,
+         15,
+         normalizedWebhook
+        );  
+
       }else{
-        logger.info('No Video URL : ', normalizedWebhook.eventId);
+        logger.info('Skipping raw video wait for event', normalizedWebhook.eventId);
       }
 
       
-
+      // ── 4. Request enhanced dual video ────────────────────────────────────
       if(isRawVideoReadyAndAvailable){
         enhancenVideoRequestResponse = await requestEnhancedDualVideo(normalizedWebhook,null,'PUT');
       }
 
-      
+       // ── 5. Wait for enhanced video URL ────────────────────────────────────
       if(enhancenVideoRequestResponse?.result === true){
           videoMetaData = await waitForEnhancedVideoURLReady(normalizedWebhook);
           
-          normalizedWebhook.media.dualEnhancedVideoUrl = videoMetaData?.driver_performance_event?.camera_media?.downloadable_videos?.dual_facing_enhanced_url;           
+          const dualUrl = videoMetaData?.driver_performance_event?.camera_media?.downloadable_videos?.dual_facing_enhanced_url;
+
+          normalizedWebhook.media.dualEnhancedVideoUrl = dualUrl ?? null; 
+
           if(normalizedWebhook.media.dualEnhancedVideoUrl){
-              isEnhancedVideoReadyAndAvailable = await waitForVideoReady(normalizedWebhook.media.dualEnhancedVideoUrl);
+              isEnhancedVideoReadyAndAvailable = await waitForVideoReady(
+                normalizedWebhook.media.dualEnhancedVideoUrl,
+                null,
+                15,
+                normalizedWebhook
+              );
           }          
       }    
 
-     
-     
-
-      normalizedWebhook.media.forwardVideoUrl = videoMetaData?.driver_performance_event?.camera_media?.downloadable_videos?.front_facing_plain_url;
-      normalizedWebhook.media.inwardVideoUrl = videoMetaData?.driver_performance_event?.camera_media?.downloadable_videos?.driver_facing_plain_url;
-      
-
-
-     
-
-
-      
-       
+      // ── 6. ALWAYS refresh URLs from fresh metadata before sending ─────────
+      // Critical: signed S3 URLs expire in 600s. After all the waiting above
+      // (up to 15 min for raw video), the original URLs will be stale.
+      logger.info('Refreshing video URLs from fresh metadata before sending...');
+      const freshMetaData = await getVideoMetaData(normalizedWebhook);
 
           
 
+      // Refresh plain URLs from latest metadata
+      if (freshMetaData) {
+        const videos = freshMetaData?.driver_performance_event?.camera_media?.downloadable_videos;
+        normalizedWebhook.media.forwardVideoUrl = videos?.front_facing_plain_url ?? null;
+        normalizedWebhook.media.inwardVideoUrl = videos?.driver_facing_plain_url ?? null;
+
+        // Also refresh the dual enhanced URL if we had one
+        if (normalizedWebhook.media.dualEnhancedVideoUrl) {
+          normalizedWebhook.media.dualEnhancedVideoUrl = videos?.dual_facing_enhanced_url ?? null;
+        }
+
+      }
+      
+
+      const hasVideo =
+        normalizedWebhook?.media?.forwardVideoUrl ||
+        normalizedWebhook?.media?.inwardVideoUrl || 
+        normalizedWebhook.media.dualEnhancedVideoUrl;
 
 
+      // ── 7. Sub-events ─────────────────────────────────────────────────────
 
-      if(requestBody?.sub_events && requestBody?.sub_events?.length>0){
+      if(requestBody?.sub_events?.length>0){
+
         let subEvents = requestBody.sub_events;
 
         for(let subEvent of subEvents){
@@ -88,7 +133,7 @@ export async function handleMotiveWebhook(req, res) {
             const subEvenInwardVideoUrl = subEvent?.camera_media?.downloadable_videos?.driver_facing_plain_url;
 
             if(subEventForwardVideoUrl && subEvenInwardVideoUrl){
-              await sendVideosAsMediaGroup(
+              await sendVideosAsMediaGroupStream(
                 normalizedWebhook.eventId, 
                 normalizedWebhook.startTime,
                 subEventForwardVideoUrl,
@@ -110,10 +155,10 @@ export async function handleMotiveWebhook(req, res) {
 
 
       
-      
-      if(isEnhancedVideoReadyAndAvailable || isRawVideoReadyAndAvailable  || hasVideo){
+      // ── 8. Send to Telegram ───────────────────────────────────────────────
+      if( isEnhancedVideoReadyAndAvailable || isRawVideoReadyAndAvailable){
 
-        await sendVideosAsMediaGroup(
+        await sendVideosAsMediaGroupStream(
           normalizedWebhook.eventId,
           normalizedWebhook.startTime,
           normalizedWebhook.media.forwardVideoUrl,
@@ -174,5 +219,5 @@ export async function handleMotiveWebhook(req, res) {
   
 
   // Always respond quickly to webhooks
-  return res.json({ ok: true });
+  
 }

@@ -70,6 +70,24 @@ export async function getVideoMetaData(payload) {
 }
 
 
+export async function getVideoMetaDataUsingId(eventId) {
+  const url = `${env.MOTIVE_BASE_URL}/api/w2/driver_performance/events/${eventId}`;
+
+  return makeApiRequest({
+    url,
+    method: "GET",
+    headers: {
+      "x-web-user-auth": env.MOTIVE_X_WEB_USER_AUTH,
+    },
+    queryParams: {
+      id: eventId,      
+      include_telematics_metadata: true,
+    },
+  });
+}
+
+
+
 
 
 export async function makeApiRequest({
@@ -206,21 +224,44 @@ export async function makeApiRequest({
 // }
 
 
-export async function waitForVideoReady(   videoUrl, maxTries = 15   ) {
-  
+export async function waitForVideoReady( forwardUrl, inwardUrl = null, maxTries = 15, normalizedWebhook=null  ) {  
   
     
-  for (let i = 0; i < maxTries; i++) {     
+   // Use mutable locals so we can refresh them mid-wait
+  let currentForwardUrl = forwardUrl;
+  let currentInwardUrl  = inwardUrl;
 
-    if (videoUrl) {
-      const probe = await probeVideoUrl(videoUrl);
-      if (probe.ok) return true;     
+  for (let i = 0; i < maxTries; i++) {
+
+    const forwardProbe = currentForwardUrl ? await probeVideoUrl(currentForwardUrl) : { ok: true };
+    const inwardProbe  = currentInwardUrl  ? await probeVideoUrl(currentInwardUrl)  : { ok: true };
+
+    if (forwardProbe.ok && inwardProbe.ok) return true;
+
+    const eitherExpired = forwardProbe.reason === 'expired' || inwardProbe.reason === 'expired';
+    if (eitherExpired && normalizedWebhook) {
+      console.log('Signed URLs expired mid-wait, refreshing from metadata...');
+      const freshMeta = await getVideoMetaData(normalizedWebhook);
+      if (freshMeta) {
+        const videos = freshMeta?.driver_performance_event?.camera_media?.downloadable_videos;
+        currentForwardUrl = videos?.front_facing_plain_url ?? currentForwardUrl;
+        currentInwardUrl  = videos?.driver_facing_plain_url ?? currentInwardUrl;
+        console.log('URLs refreshed, continuing to wait...');
+      }
     }
 
-    await new Promise(r => setTimeout(r, 60000)); // wait 60s
+    console.log(`Video not ready yet (attempt ${i + 1}/${maxTries})`, {
+      forward: forwardProbe.reason ?? 'ok',
+      inward:  inwardProbe.reason  ?? 'ok',
+    });
+
+    await new Promise(r => setTimeout(r, 60_000));
   }
 
   return false;
+
+
+  
 }
 
 
@@ -233,26 +274,30 @@ export async function waitForVideoReady(   videoUrl, maxTries = 15   ) {
 
 
 export async function probeVideoUrl(url) {
-  const res = await axios.get(url, {
-    responseType: "text",
-    headers: { Range: "bytes=0-1" }, // small request; often returns 206
-    timeout: 15000,
-    validateStatus: () => true,
-  });
+  try {
+    const res = await axios.get(url, {
+      responseType: "text",
+      headers: { Range: "bytes=0-1" },
+      timeout: 30_000,
+      validateStatus: () => true,
+    });
 
-  if (res.status === 200 || res.status === 206) return { ok: true };
+    if (res.status === 200 || res.status === 206) return { ok: true };
 
-  // S3 missing key often appears as 404 with XML body containing NoSuchKey
-  if (res.status === 404 && typeof res.data === "string" && res.data.includes("NoSuchKey")) {
-    return { ok: false, reason: "not_ready_no_such_key" };
+    if (res.status === 404 && typeof res.data === "string" && res.data.includes("NoSuchKey")) {
+      return { ok: false, reason: "not_ready_no_such_key" };
+    }
+
+    if (res.status === 403 && typeof res.data === "string" && res.data.includes("Request has expired")) {
+      return { ok: false, reason: "expired" };
+    }
+
+    return { ok: false, reason: `status_${res.status}` };
+
+  } catch (err) {
+    // Treat all network errors as "not ready yet" — waitForVideoReady will retry
+    return { ok: false, reason: `network_error_${err?.code ?? err?.message}` };
   }
-
-  // Expired signed URL often 403 with "Request has expired"
-  if (res.status === 403 && typeof res.data === "string" && res.data.includes("Request has expired")) {
-    return { ok: false, reason: "expired" };
-  }
-
-  return { ok: false, reason: `status_${res.status}` };
 }
 
 
@@ -266,12 +311,11 @@ export async function waitForEnhancedVideoURLReady(  normalizedWebhook, maxTries
     metaData = await getVideoMetaData(normalizedWebhook);      
     const enhancedVideoUrl = metaData?.driver_performance_event?.camera_media?.downloadable_videos?.dual_facing_enhanced_url;
 
-    if (enhancedVideoUrl) {
-          
-      if (enhancedVideoUrl) return metaData;     
+    if (enhancedVideoUrl) {          
+      return metaData;     
     }
 
-    await new Promise(r => setTimeout(r, 10000)); // wait 60s
+    await new Promise(r => setTimeout(r, 10000)); // wait 10s
   }
 
   return metaData;
