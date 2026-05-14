@@ -165,6 +165,7 @@ function eventTypeParse(alertType){
       break;
       default:
           alertType = alertType.replaceAll('_',' ');
+          alertType = alertType.length > 0 ? alertType[0].toUpperCase() + alertType.slice(1) : alertType;
     }
 
     return alertType;

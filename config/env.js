@@ -21,12 +21,12 @@ export const env = {
   NODE_ENV: process.env.NODE_ENV ?? "test",
   PORT: number("PORT", 8443),
 
-  MOTIVE_BASE_URL: process.env.MOTIVE_BASE_URL ?? "https://api.gomotive.com",
+  
   MOTIVE_API_TOKEN: required("MOTIVE_API_TOKEN"),
-
+  TELEGRAM_USER_ID : required("TELEGRAM_USER_ID"),
   TELEGRAM_BOT_TOKEN: required("TELEGRAM_BOT_TOKEN"),
   TELEGRAM_CHAT_ID: required("TELEGRAM_CHAT_ID"),
-  MOTIVE_BASE_URL : required("MOTVIE_BASE_URL"),
+  MOTIVE_BASE_URL : required("MOTIVE_BASE_URL"),
   MOTIVE_X_WEB_USER_AUTH : required("MOTIVE_X_WEB_USER_AUTH"),
 };
 
