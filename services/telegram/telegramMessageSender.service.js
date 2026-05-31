@@ -2,6 +2,7 @@ import axios from "axios";
 import FormData from "form-data";
 import { env } from "../../config/env.js"; // or wherever you keep env
 import https from "https";
+import { logger } from "../../utils/logger.js";
 
 const telegramAgent = new https.Agent({
   keepAlive: true,
@@ -279,27 +280,27 @@ export async function sendImagesToGroup(
   // filter(Boolean) catches null/undefined but NOT the string "null" or whitespace
   const isValidUrl = (u) => typeof u === 'string' && u.startsWith('http');
   const photos = [forwardUrl, inwardUrl].filter(isValidUrl);
- 
-  // Log what we actually have so bad URLs are visible in logs
-  console.log("sendImagesToGroup URLs", {
-    eventId,
-    forwardUrl: forwardUrl ?? "(none)",
-    inwardUrl:  inwardUrl  ?? "(none)",
-    validCount: photos.length,
-  });
- 
-  try {
-    if (photos.length === 0) {
-      console.warn("sendImagesToGroup: no valid image URLs provided, skipping", {
+
+  if (photos.length === 0) {
+      logger.warn("sendImagesToGroup: no valid image URLs provided, skipping", {
         eventId,
         forwardUrl,
         inwardUrl,
       });
       return;
     }
+
  
-    if (photos.length === 1) {
-      form.append('photo', photos[0]);
+  try {    
+
+    const buffers = await Promise.all(
+      photos.map(url => getVideoBuffer(url))
+    );
+
+
+ 
+    if (buffers.length === 1) {
+      form.append('photo', buffers[0], { filename: 'photo.jpg', contentType: 'image/jpeg' });
       form.append('caption', caption);
       form.append('parse_mode', 'MarkdownV2');
  
@@ -309,9 +310,12 @@ export async function sendImagesToGroup(
         { headers: form.getHeaders(), timeout: 60_000 }
       );
     } else {
+      form.append('photo1', buffers[0], { filename: 'forward.jpg', contentType: 'image/jpeg' });
+      form.append('photo2', buffers[1], { filename: 'inward.jpg',  contentType: 'image/jpeg' });
+
       const media = [
-        { type: 'photo', media: photos[0], caption, parse_mode: "MarkdownV2" },
-        { type: 'photo', media: photos[1] },
+        { type: 'photo', media: 'attach://photo1', caption, parse_mode: "MarkdownV2" },
+        { type: 'photo', media: 'attach://photo2' },
       ];
       form.append('media', JSON.stringify(media));
  

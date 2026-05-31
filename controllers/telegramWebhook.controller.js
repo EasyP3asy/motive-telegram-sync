@@ -4,6 +4,7 @@ import { getVideoMetaDataUsingId, makeApiRequest } from  "../services/motive/mot
 import { env } from "../config/env.js";
 import { AppError } from "../utils/AppError.js";
 
+
 export async function handleTelegramUpdate(req, res) {
  
   res.json({ ok: true });
@@ -13,17 +14,26 @@ export async function handleTelegramUpdate(req, res) {
    void (async () => {
       try {
          const normalizedWebhook = await processTelegramMessageWebhook(requestBody);
-         if(!normalizedWebhook) throw new Error("No telegram user message");
+         if(!normalizedWebhook) return;
+        
 
-         if(!normalizedWebhook.motiveId) throw new Error("No Motive ID To update");
+         if(!normalizedWebhook.motiveId){
+           logger.error("Telegram error : No Motive Id to update motive event");
+           return;
+         };
          
          const videoMetaData = await getVideoMetaDataUsingId(normalizedWebhook.motiveId);         
-         if(!videoMetaData) throw new Error("Telegram error :  No Video MetaData To Update Event");
-
+         if(!videoMetaData){
+          logger.error("Telegram error :  No Video MetaData To Update Event");
+          return;
+         }
 
          const performanceEventId = videoMetaData?.driver_performance_event?.driver_performance_metadata?.id;
-         if (!performanceEventId) throw new Error("No performanceEventId found in video metadata");
-        
+         if (!performanceEventId) {
+          logger.error("Telegram error : No performanceEventId found in video metadata");
+          return;
+         }
+
          normalizedWebhook.eventId = performanceEventId;
 
          const eventStatusUpdateURL = `https://api.keeptruckin.com/api/w2/driver_performance/events/${normalizedWebhook.motiveId}/driver_performance_metadata/${normalizedWebhook.eventId}`;

@@ -1,6 +1,23 @@
 import { env } from "../config/env.js";
 
+
+
+
 const levels = { debug: 10, info: 20, warn: 30, error: 40 };
+
+
+
+const colors = {
+  reset:  "\x1b[0m",
+  debug:  "\x1b[36m",   // cyan
+  info:   "\x1b[32m",   // green
+  warn:   "\x1b[38;5;226m",   // yellow
+  error:  "\x1b[38;5;202m",   // red
+  dim:    "\x1b[38;5;231m",    // default color white 
+};
+
+
+
 
 function getLevel() {
   // In prod default to info; otherwise default to debug
@@ -22,7 +39,8 @@ function stamp() {
 function log(level, ...args) {
   if (!shouldLog(level)) return;
 
-  const prefix = `[${stamp()}] [${level.toUpperCase()}]`;
+  const color  = colors[level] ?? colors.reset;
+  const prefix = `${colors.dim}[${stamp()}] ${color}[${level.toUpperCase()}]${colors.reset}`;
 
   if (level === "error") console.error(prefix, ...args);
   else if (level === "warn") console.warn(prefix, ...args);
@@ -55,5 +73,5 @@ function toNYIsoLocal(utcIso) {
 
   const get = (type) => parts.find((p) => p.type === type)?.value;
 
-  return `${get("year")}-${get("month")}-${get("day")}T${get("hour")}:${get("minute")}:${get("second")}.${get("fractionalSecond")}`;
+  return `${get("year")}-${get("month")}-${get("day")}T${get("hour")}:${get("minute")}:${get("second")}`;
 }

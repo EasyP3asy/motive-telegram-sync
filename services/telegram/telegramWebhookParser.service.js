@@ -16,22 +16,26 @@ export async function processTelegramMessageWebhook(payload) {
 
 
   const message = payload?.message || payload?.edited_message;
-  if (!message) return;
+  if (!message) {
+    logger.error("Telegram error: Request doesn't contain Message BODY");
+    return null;
+  };
 
+  const repliedMessageCaption = message?.reply_to_message?.caption ?? null;
+
+  if (!repliedMessageCaption) {
+    logger.warn("Telegram error: it's NOT a reply to a caption message");
+    return null;
+  }
   
   const messageText = message.text || message.caption || null;
 
   if(!messageText){
-    throw new AppError("Empty reply", 500, "INVALID_PAYLOAD");
+    logger.warn("Telegram error: Message is empty , No Caption or Text");
     return null;
   }
   
-  const repliedMessageCaption = message?.reply_to_message?.caption ?? null;
-
-  if (!repliedMessageCaption) {
-    logger.warn("Telegram message ignored: not a reply to a caption message");
-    return null;
-  }
+  
   
 
 
